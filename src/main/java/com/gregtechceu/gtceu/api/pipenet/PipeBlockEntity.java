@@ -19,18 +19,13 @@ import com.gregtechceu.gtceu.common.data.GTMaterialBlocks;
 import com.gregtechceu.gtceu.common.data.GTMaterials;
 import com.gregtechceu.gtceu.common.datafixers.TagFixer;
 import com.gregtechceu.gtceu.config.ConfigHolder;
+import com.gregtechceu.gtceu.syncsystem.ManagedSyncBlockEntity;
+import com.gregtechceu.gtceu.syncsystem.annotations.RerenderOnChanged;
+import com.gregtechceu.gtceu.syncsystem.annotations.SaveField;
+import com.gregtechceu.gtceu.syncsystem.annotations.SyncToClient;
 import com.gregtechceu.gtceu.utils.GTUtil;
 
 import com.lowdragmc.lowdraglib.gui.texture.ResourceTexture;
-import com.lowdragmc.lowdraglib.syncdata.IEnhancedManaged;
-import com.lowdragmc.lowdraglib.syncdata.IManagedStorage;
-import com.lowdragmc.lowdraglib.syncdata.annotation.DescSynced;
-import com.lowdragmc.lowdraglib.syncdata.annotation.Persisted;
-import com.lowdragmc.lowdraglib.syncdata.annotation.RequireRerender;
-import com.lowdragmc.lowdraglib.syncdata.blockentity.IAsyncAutoSyncBlockEntity;
-import com.lowdragmc.lowdraglib.syncdata.blockentity.IAutoPersistBlockEntity;
-import com.lowdragmc.lowdraglib.syncdata.field.FieldManagedStorage;
-import com.lowdragmc.lowdraglib.syncdata.field.ManagedFieldHolder;
 
 import net.minecraft.MethodsReturnNonnullByDefault;
 import net.minecraft.core.BlockPos;
@@ -65,47 +60,38 @@ import javax.annotation.ParametersAreNonnullByDefault;
 @ParametersAreNonnullByDefault
 @MethodsReturnNonnullByDefault
 public abstract class PipeBlockEntity<PipeType extends Enum<PipeType> & IPipeType<NodeDataType>, NodeDataType>
-                                     extends BlockEntity implements IEnhancedManaged,
-                                     IAsyncAutoSyncBlockEntity, IAutoPersistBlockEntity, IToolGridHighlight, IToolable,
-                                     ITickSubscription, IPaintable {
+                                     extends ManagedSyncBlockEntity implements IToolGridHighlight, IToolable, ITickSubscription, IPaintable {
 
-    public static final ManagedFieldHolder MANAGED_FIELD_HOLDER = new ManagedFieldHolder(PipeBlockEntity.class);
-    @Getter
-    private final FieldManagedStorage syncStorage = new FieldManagedStorage(this);
     private final long offset = GTValues.RNG.nextInt(20);
 
     public static final int ALL_OPENED = 0b111111;
     public static final int ALL_CLOSED = 0b000000;
 
     @Getter
-    @DescSynced
-    @Persisted(key = "cover")
+    @SyncToClient
+    @SaveField(nbtKey = "cover")
     protected final PipeCoverContainer coverContainer;
 
     @Getter
-    @Setter(onMethod_ = @ApiStatus.Internal)
-    @DescSynced
-    @Persisted
-    @RequireRerender
+    @SyncToClient
+    @SaveField
+    @RerenderOnChanged
     protected int connections = ALL_CLOSED;
-    @Setter
-    @DescSynced
-    @Persisted
-    @RequireRerender
+    @SyncToClient
+    @SaveField
+    @RerenderOnChanged
     private int blockedConnections = ALL_CLOSED;
     private NodeDataType cachedNodeData;
 
-    @Persisted
-    @DescSynced
-    @RequireRerender
+    @SaveField
+    @SyncToClient
+    @RerenderOnChanged
     @Getter
-    @Setter
     private int paintingColor = -1;
 
-    @RequireRerender
-    @DescSynced
-    @Persisted
-    @Setter
+    @RerenderOnChanged
+    @SyncToClient
+    @SaveField
     @NotNull
     private Material frameMaterial = GTMaterials.NULL;
 
@@ -158,32 +144,6 @@ public abstract class PipeBlockEntity<PipeType extends Enum<PipeType> & IPipeTyp
         }
     }
 
-    @Override
-    public IManagedStorage getRootStorage() {
-        return syncStorage;
-    }
-
-    @Override
-    public ManagedFieldHolder getFieldHolder() {
-        return MANAGED_FIELD_HOLDER;
-    }
-
-    @Override
-    public void onChanged() {
-        var level = getLevel();
-        if (level != null && !level.isClientSide && level.getServer() != null) {
-            level.getServer().execute(this::setChanged);
-        }
-    }
-
-    public boolean isRemote() {
-        var level = getLevel();
-        if (level == null) {
-            return GTCEu.isClientThread();
-        }
-        return level.isClientSide;
-    }
-
     public long getOffsetTimer() {
         return level == null ? offset : (level.getServer().getTickCount() + offset);
     }
@@ -192,6 +152,26 @@ public abstract class PipeBlockEntity<PipeType extends Enum<PipeType> & IPipeTyp
     public void clearRemoved() {
         super.clearRemoved();
         coverContainer.onLoad();
+    }
+
+    public void setConnections(int connections) {
+        this.connections = connections;
+        syncDataHolder.markClientSyncFieldDirty("connections");
+    }
+
+    public void setBlockedConnections(int blocked) {
+        this.blockedConnections = blocked;
+        syncDataHolder.markClientSyncFieldDirty("blockedConnections");
+    }
+
+    public void setPaintingColor(int col) {
+        paintingColor = col;
+        syncDataHolder.markClientSyncFieldDirty("paintingColor");
+    }
+
+    public void setFrameMaterial(Material mat) {
+        frameMaterial = mat;
+        syncDataHolder.markClientSyncFieldDirty("frameMaterial");
     }
 
     public int getNumConnections() {
@@ -339,6 +319,7 @@ public abstract class PipeBlockEntity<PipeType extends Enum<PipeType> & IPipeTyp
     public void setBlocked(Direction side, boolean isBlocked) {
         if (level instanceof ServerLevel serverLevel && canHaveBlockedFaces()) {
             blockedConnections = withSideConnection(blockedConnections, side, isBlocked);
+            syncDataHolder.markClientSyncFieldDirty("blockedConnections");
             setChanged();
             LevelPipeNet worldPipeNet = LevelPipeNet.getLevelPipeNet(serverLevel, networkType);
             PipeNet net = worldPipeNet.getNetFromPos(getBlockPos());
@@ -380,7 +361,7 @@ public abstract class PipeBlockEntity<PipeType extends Enum<PipeType> & IPipeTyp
             }
 
             connections = withSideConnection(connections, side, connected);
-
+            syncDataHolder.markClientSyncFieldDirty("connections");
             updateNetworkConnection(side, connected);
             // notify neighbor of change so Auto Output updates its ticking status
             getLevel().neighborChanged(getBlockPos().relative(side), getPipeBlock(), getBlockPos());
@@ -437,6 +418,11 @@ public abstract class PipeBlockEntity<PipeType extends Enum<PipeType> & IPipeTyp
         if (getLevel() != null) {
             getLevel().blockEntityChanged(getBlockPos());
         }
+    }
+
+    public boolean isRemote() {
+        var level = getLevel();
+        return level == null ? GTCEu.isClientThread() : level.isClientSide;
     }
 
     //////////////////////////////////////

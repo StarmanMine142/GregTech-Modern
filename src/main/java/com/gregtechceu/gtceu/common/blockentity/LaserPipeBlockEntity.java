@@ -8,12 +8,10 @@ import com.gregtechceu.gtceu.api.pipenet.LevelPipeNet;
 import com.gregtechceu.gtceu.api.pipenet.PipeBlockEntity;
 import com.gregtechceu.gtceu.common.pipelike.GTPipeNetworks;
 import com.gregtechceu.gtceu.common.pipelike.laser.*;
+import com.gregtechceu.gtceu.syncsystem.annotations.SaveField;
+import com.gregtechceu.gtceu.syncsystem.annotations.SyncToClient;
 import com.gregtechceu.gtceu.utils.GTUtil;
 import com.gregtechceu.gtceu.utils.TaskHandler;
-
-import com.lowdragmc.lowdraglib.syncdata.annotation.DescSynced;
-import com.lowdragmc.lowdraglib.syncdata.annotation.Persisted;
-import com.lowdragmc.lowdraglib.syncdata.field.ManagedFieldHolder;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -33,9 +31,6 @@ import java.util.EnumMap;
 
 public class LaserPipeBlockEntity extends PipeBlockEntity<LaserPipeType, LaserPipeProperties> {
 
-    public static final ManagedFieldHolder MANAGED_FIELD_HOLDER = new ManagedFieldHolder(LaserPipeBlockEntity.class,
-            PipeBlockEntity.MANAGED_FIELD_HOLDER);
-
     @Getter
     protected final EnumMap<Direction, LaserNetHandler> handlers = new EnumMap<>(Direction.class);
     // the LaserNetHandler can only be created on the server, so we have an empty placeholder for the client
@@ -47,8 +42,8 @@ public class LaserPipeBlockEntity extends PipeBlockEntity<LaserPipeType, LaserPi
     private int ticksActive = 0;
     private int activeDuration = 0;
     @Getter
-    @Persisted
-    @DescSynced
+    @SaveField
+    @SyncToClient
     private boolean active = false;
 
     protected LaserPipeBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState blockState) {
@@ -130,6 +125,7 @@ public class LaserPipeBlockEntity extends PipeBlockEntity<LaserPipeType, LaserPi
     public void setActive(boolean active, int duration) {
         if (this.active != active) {
             this.active = active;
+            syncDataHolder.markClientSyncFieldDirty("active");
             notifyBlockUpdate();
             setChanged();
             if (active && duration != this.activeDuration) {
@@ -187,11 +183,6 @@ public class LaserPipeBlockEntity extends PipeBlockEntity<LaserPipeType, LaserPi
     @Override
     public GTToolType getPipeTuneTool() {
         return GTToolType.WIRE_CUTTER;
-    }
-
-    @Override
-    public ManagedFieldHolder getFieldHolder() {
-        return MANAGED_FIELD_HOLDER;
     }
 
     private static class DefaultLaserContainer implements ILaserContainer {
